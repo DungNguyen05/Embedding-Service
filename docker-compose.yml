@@ -1,32 +1,44 @@
+version: '3.8'
+
 services:
   vietnamese-embedding-service:
     build: 
       context: .
       dockerfile: Dockerfile
+    container_name: vietnamese-embedding-api
     ports:
       - "8000:8000"
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - EMBEDDING_MODEL_NAME=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-      - DEVICE=cpu
-      - LOG_LEVEL=INFO
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      - DEVICE=${DEVICE:-cpu}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TRANSFORMERS_CACHE=/home/app/.cache/huggingface
+      - TORCH_HOME=/home/app/.cache/torch
     volumes:
-      - model_cache:/home/app/.cache/huggingface
+      # Create named volumes with proper permissions
+      - huggingface_cache:/home/app/.cache/huggingface
+      - torch_cache:/home/app/.cache/torch
+      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 180s  # Give more time for model download
+      start_period: 300s  # 5 minutes for model download
     deploy:
       resources:
         limits:
           memory: 4G
+          cpus: '2.0'
         reservations:
           memory: 2G
+          cpus: '1.0'
 
 volumes:
-  model_cache:
+  huggingface_cache:
+    driver: local
+  torch_cache:
     driver: local
