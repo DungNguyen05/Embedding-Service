@@ -8,8 +8,9 @@ from app.api.embeddings import router as embeddings_router
 # Load environment variables
 load_dotenv()
 
-# Minimal logging
-logging.basicConfig(level=logging.ERROR)
+# Configure logging from environment variable
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, log_level))
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
@@ -39,8 +40,9 @@ async def startup_event():
     try:
         from app.models.embedding_model import get_embedding_model
         get_embedding_model()
-    except Exception:
-        pass
+        logger.info("Model loaded successfully")
+    except Exception as e:
+        logger.error(f"Failed to load model: {e}")
 
 @app.get("/")
 async def root():

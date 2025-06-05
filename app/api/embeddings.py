@@ -40,14 +40,23 @@ class ModelListResponse(BaseModel):
 @router.post("/v1/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(request: EmbeddingRequest):
     """Create embeddings - OpenAI compatible."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info("=== EMBEDDING REQUEST STARTED ===")
+        logger.info(f"Request: {request}")
+        
         model = get_embedding_model()
+        logger.info("Model retrieved successfully")
         
         # Prepare texts
         if isinstance(request.input, str):
             texts = [request.input]
         else:
             texts = request.input
+        
+        logger.info(f"Processing {len(texts)} text(s): {texts}")
         
         if not texts:
             raise HTTPException(status_code=400, detail="Input cannot be empty")
@@ -58,8 +67,12 @@ async def create_embeddings(request: EmbeddingRequest):
             clean_text = text.strip()[:512]  # Simple truncation
             processed_texts.append(clean_text if clean_text else " ")
         
+        logger.info(f"Processed texts: {processed_texts}")
+        
         # Generate embeddings
+        logger.info("Generating embeddings...")
         embeddings = model.encode(processed_texts, normalize_embeddings=True)
+        logger.info(f"Embeddings generated with shape: {embeddings.shape}")
         
         # Prepare response
         embedding_data = []
@@ -73,7 +86,7 @@ async def create_embeddings(request: EmbeddingRequest):
         total_chars = sum(len(text) for text in processed_texts)
         estimated_tokens = max(1, total_chars // 4)
         
-        return EmbeddingResponse(
+        response = EmbeddingResponse(
             data=embedding_data,
             model="text-embedding-ada-002",
             usage=EmbeddingUsage(
@@ -82,7 +95,14 @@ async def create_embeddings(request: EmbeddingRequest):
             )
         )
         
+        logger.info("=== EMBEDDING REQUEST COMPLETED ===")
+        return response
+        
     except Exception as e:
+        logger.error(f"=== EMBEDDING REQUEST FAILED: {str(e)} ===")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/v1/models", response_model=ModelListResponse)
