@@ -33,7 +33,7 @@ class VietnameseEmbeddingModel:
         self.model_name = model_name or self.vietnamese_models[0]
         
         # Auto-detect device if not specified
-        if device is None:
+        if device is None or device == "auto":
             if torch.cuda.is_available():
                 device = "cuda"
             else:
@@ -70,13 +70,14 @@ class VietnameseEmbeddingModel:
                 # If all models fail, raise the original error
                 raise Exception(f"All embedding models failed to load. Last error: {e}")
     
-    def encode(self, texts: Union[str, List[str]], normalize_embeddings: bool = True) -> np.ndarray:
+    def encode(self, texts: Union[str, List[str]], normalize_embeddings: bool = True, **kwargs) -> np.ndarray:
         """
         Encode texts into embeddings.
         
         Args:
             texts: Single text string or list of text strings
             normalize_embeddings: Whether to normalize embeddings to unit length
+            **kwargs: Additional arguments (filtered to valid ones)
             
         Returns:
             numpy array of embeddings
@@ -85,18 +86,38 @@ class VietnameseEmbeddingModel:
             texts = [texts]
         
         try:
-            # Generate embeddings
-            embeddings = self.model.encode(
-                texts,
-                normalize_embeddings=normalize_embeddings,
-                convert_to_numpy=True,
-                show_progress_bar=False
-            )
+            # Filter kwargs to only include valid parameters for sentence-transformers
+            valid_kwargs = {}
+            allowed_params = {
+                'batch_size', 'show_progress_bar', 'output_value', 
+                'convert_to_numpy', 'convert_to_tensor', 'device',
+                'normalize_embeddings'
+            }
             
+            for key, value in kwargs.items():
+                if key in allowed_params:
+                    valid_kwargs[key] = value
+            
+            # Set sensible defaults
+            encode_params = {
+                'normalize_embeddings': normalize_embeddings,
+                'convert_to_numpy': True,
+                'show_progress_bar': False,
+                **valid_kwargs
+            }
+            
+            logger.info(f"Encoding {len(texts)} texts with params: {encode_params}")
+            
+            # Generate embeddings
+            embeddings = self.model.encode(texts, **encode_params)
+            
+            logger.info(f"Successfully encoded {len(texts)} texts. Shape: {embeddings.shape}")
             return embeddings
             
         except Exception as e:
             logger.error(f"Error encoding texts: {e}")
+            logger.error(f"Texts: {texts}")
+            logger.error(f"Parameters: {encode_params}")
             raise
     
     def get_dimensions(self) -> int:
@@ -115,6 +136,6 @@ def get_embedding_model() -> VietnameseEmbeddingModel:
     global _model_instance
     if _model_instance is None:
         model_name = os.getenv("EMBEDDING_MODEL_NAME")
-        device = os.getenv("DEVICE")
+        device = os.getenv("DEVICE", "auto")
         _model_instance = VietnameseEmbeddingModel(model_name=model_name, device=device)
     return _model_instance

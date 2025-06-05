@@ -3,6 +3,9 @@ from pydantic import BaseModel, Field
 from typing import List, Union, Optional
 import time
 import logging
+import traceback
+import gc
+import torch
 from app.models.embedding_model import get_embedding_model
 from app.utils.preprocessing import preprocess_texts, truncate_text
 
@@ -50,8 +53,14 @@ async def create_embeddings(request: EmbeddingRequest):
     Compatible with OpenAI's embeddings API format.
     """
     try:
+        logger.info(f"=== Starting embedding request ===")
+        logger.info(f"Input type: {type(request.input)}")
+        logger.info(f"Input content: {request.input}")
+        
         # Get the embedding model
+        logger.info("Getting embedding model...")
         model = get_embedding_model()
+        logger.info(f"Model retrieved: {model.get_model_name()}")
         
         # Prepare input texts
         if isinstance(request.input, str):
@@ -62,24 +71,84 @@ async def create_embeddings(request: EmbeddingRequest):
         if not texts:
             raise HTTPException(status_code=400, detail="Input cannot be empty")
         
-        # Preprocess texts
-        processed_texts = preprocess_texts(texts)
+        logger.info(f"Number of texts to process: {len(texts)}")
         
-        # Truncate texts if they're too long (most models have token limits)
-        truncated_texts = [truncate_text(text, max_length=2048) for text in processed_texts]
+        # Preprocess texts with error handling
+        try:
+            logger.info("Starting text preprocessing...")
+            processed_texts = preprocess_texts(texts)
+            logger.info(f"Preprocessing successful. Results: {processed_texts}")
+        except Exception as prep_error:
+            logger.error(f"Preprocessing failed: {prep_error}")
+            logger.error(f"Preprocessing traceback: {traceback.format_exc()}")
+            # Use original texts if preprocessing fails
+            processed_texts = texts
         
-        logger.info(f"Processing {len(truncated_texts)} texts for embeddings")
+        # Truncate texts if they're too long
+        try:
+            logger.info("Starting text truncation...")
+            truncated_texts = [truncate_text(text, max_length=256) for text in processed_texts]  # Reduced max_length
+            logger.info(f"Truncation successful. Results: {truncated_texts}")
+        except Exception as trunc_error:
+            logger.error(f"Truncation failed: {trunc_error}")
+            logger.error(f"Truncation traceback: {traceback.format_exc()}")
+            # Use processed texts if truncation fails
+            truncated_texts = processed_texts
         
-        # Generate embeddings
-        embeddings = model.encode(truncated_texts, normalize_embeddings=True)
+        logger.info(f"About to generate embeddings for: {truncated_texts}")
+        
+        # Force garbage collection before heavy operation
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Generate embeddings with comprehensive error handling
+        try:
+            logger.info("=== Starting embedding generation ===")
+            
+            # Generate embeddings with correct parameters
+            embeddings = model.encode(
+                truncated_texts, 
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                convert_to_numpy=True
+            )
+            
+            logger.info(f"Embedding generation successful!")
+            logger.info(f"Embeddings shape: {embeddings.shape}")
+            logger.info(f"Embeddings type: {type(embeddings)}")
+            
+        except Exception as embed_error:
+            logger.error(f"=== EMBEDDING GENERATION FAILED ===")
+            logger.error(f"Error type: {type(embed_error)}")
+            logger.error(f"Error message: {str(embed_error)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            
+            # Try to get more system info
+            try:
+                import psutil
+                memory_info = psutil.virtual_memory()
+                logger.error(f"Available memory: {memory_info.available / 1024 / 1024:.2f} MB")
+                logger.error(f"Memory percent used: {memory_info.percent}%")
+            except:
+                logger.error("Could not get memory info")
+            
+            raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(embed_error)}")
         
         # Prepare response data
-        embedding_data = []
-        for i, embedding in enumerate(embeddings):
-            embedding_data.append(EmbeddingData(
-                embedding=embedding.tolist(),
-                index=i
-            ))
+        try:
+            logger.info("Preparing response data...")
+            embedding_data = []
+            for i, embedding in enumerate(embeddings):
+                embedding_data.append(EmbeddingData(
+                    embedding=embedding.tolist(),
+                    index=i
+                ))
+            logger.info(f"Response data prepared for {len(embedding_data)} embeddings")
+        except Exception as resp_error:
+            logger.error(f"Response preparation failed: {resp_error}")
+            logger.error(f"Response traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Response preparation failed: {str(resp_error)}")
         
         # Calculate usage (rough estimate)
         total_chars = sum(len(text) for text in truncated_texts)
@@ -94,11 +163,28 @@ async def create_embeddings(request: EmbeddingRequest):
             )
         )
         
-        logger.info(f"Successfully generated {len(embedding_data)} embeddings")
+        logger.info(f"=== Request completed successfully ===")
+        logger.info(f"Generated {len(embedding_data)} embeddings")
+        
+        # Clean up
+        gc.collect()
+        
         return response
         
+    except HTTPException:
+        logger.error("HTTPException occurred, re-raising")
+        raise
     except Exception as e:
-        logger.error(f"Error creating embeddings: {e}")
+        logger.error(f"=== UNEXPECTED ERROR ===")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Clean up on error
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.get("/v1/models", response_model=ModelListResponse)
