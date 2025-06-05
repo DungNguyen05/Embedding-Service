@@ -34,6 +34,11 @@ class VietnameseEmbeddingModel:
             convert_to_numpy=True,
             show_progress_bar=False
         )
+        
+        # Truncate to 382 dimensions if needed
+        if embeddings.shape[1] > 382:
+            embeddings = embeddings[:, :382]
+        
         return embeddings
     
     def get_dimensions(self) -> int:
