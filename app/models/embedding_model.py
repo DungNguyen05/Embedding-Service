@@ -3,6 +3,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Union, Optional
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class VietnameseEmbeddingModel:
     """Simple embedding model wrapper with flexible dimensions."""
@@ -14,16 +17,36 @@ class VietnameseEmbeddingModel:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         
+        logger.info(f"Loading model: {self.model_name} on device: {self.device}")
+        
         try:
             self.model = SentenceTransformer(self.model_name, device=self.device)
             self.max_dimensions = self.model.get_sentence_embedding_dimension()
-            self.default_dimensions = int(os.getenv("DEFAULT_EMBEDDING_DIMENSIONS", str(self.max_dimensions)))
+            
+            # Ensure default dimensions don't exceed model's maximum
+            env_default = int(os.getenv("DEFAULT_EMBEDDING_DIMENSIONS", str(self.max_dimensions)))
+            self.default_dimensions = min(env_default, self.max_dimensions)
+            
+            if env_default > self.max_dimensions:
+                logger.warning(f"DEFAULT_EMBEDDING_DIMENSIONS ({env_default}) exceeds model max ({self.max_dimensions}). Using {self.default_dimensions}")
+            
+            logger.info(f"Model loaded successfully. Max dimensions: {self.max_dimensions}")
         except Exception as e:
+            logger.warning(f"Failed to load primary model {self.model_name}: {e}")
+            logger.info("Falling back to basic model")
             # Fallback to basic model
             self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
             self.model = SentenceTransformer(self.model_name, device=self.device)
             self.max_dimensions = self.model.get_sentence_embedding_dimension()
-            self.default_dimensions = int(os.getenv("DEFAULT_EMBEDDING_DIMENSIONS", str(self.max_dimensions)))
+            
+            # Ensure default dimensions don't exceed model's maximum
+            env_default = int(os.getenv("DEFAULT_EMBEDDING_DIMENSIONS", str(self.max_dimensions)))
+            self.default_dimensions = min(env_default, self.max_dimensions)
+            
+            if env_default > self.max_dimensions:
+                logger.warning(f"DEFAULT_EMBEDDING_DIMENSIONS ({env_default}) exceeds model max ({self.max_dimensions}). Using {self.default_dimensions}")
+            
+            logger.info(f"Fallback model loaded. Max dimensions: {self.max_dimensions}")
     
     def encode(self, texts: Union[str, List[str]], dimensions: Optional[int] = None, 
                normalize_embeddings: bool = True, **kwargs) -> np.ndarray:
@@ -31,19 +54,31 @@ class VietnameseEmbeddingModel:
         if isinstance(texts, str):
             texts = [texts]
         
-        embeddings = self.model.encode(
-            texts, 
-            normalize_embeddings=normalize_embeddings,
-            convert_to_numpy=True,
-            show_progress_bar=False
-        )
+        # Clean empty texts
+        processed_texts = []
+        for text in texts:
+            clean_text = str(text).strip()
+            if not clean_text:
+                clean_text = " "  # Use space for empty texts
+            processed_texts.append(clean_text)
         
-        # Apply dimension truncation if requested
-        target_dimensions = dimensions or self.default_dimensions
-        if target_dimensions and target_dimensions < embeddings.shape[1]:
-            embeddings = embeddings[:, :target_dimensions]
-        
-        return embeddings
+        try:
+            embeddings = self.model.encode(
+                processed_texts, 
+                normalize_embeddings=normalize_embeddings,
+                convert_to_numpy=True,
+                show_progress_bar=False
+            )
+            
+            # Apply dimension truncation if requested
+            target_dimensions = dimensions or self.default_dimensions
+            if target_dimensions and target_dimensions < embeddings.shape[1]:
+                embeddings = embeddings[:, :target_dimensions]
+            
+            return embeddings
+        except Exception as e:
+            logger.error(f"Error encoding texts: {e}")
+            raise
     
     def get_max_dimensions(self) -> int:
         """Get the maximum dimensions supported by the model."""

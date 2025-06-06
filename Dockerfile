@@ -3,25 +3,33 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y curl build-essential && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create app user
 RUN useradd --create-home --shell /bin/bash app
 
-# Copy requirements and install
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Create directories
+# Create necessary directories
 RUN mkdir -p /home/app/.cache/huggingface /app/logs
 RUN chown -R app:app /home/app /app
 
 # Switch to app user
 USER app
 
-# Copy application
+# Copy application code
 COPY --chown=app:app app/ ./app/
-COPY --chown=app:app .env ./
+COPY --chown=app:app .env ./ 2>/dev/null || echo "No .env file found, using environment variables"
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV TOKENIZERS_PARALLELISM=false
 
 # Expose port
 EXPOSE 8000
