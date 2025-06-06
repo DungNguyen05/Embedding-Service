@@ -10,7 +10,7 @@ class EmbeddingRequest(BaseModel):
     input: Union[str, List[str]] = Field(..., description="Text or list of texts to embed")
     model: str = Field(default="text-embedding-ada-002")
     encoding_format: Optional[str] = Field(default="float")
-    dimensions: Optional[int] = Field(default=None)
+    dimensions: Optional[int] = Field(default=None, description="Number of dimensions for the embeddings")
 
 class EmbeddingData(BaseModel):
     object: str = "embedding"
@@ -32,6 +32,8 @@ class ModelInfo(BaseModel):
     object: str = "model"
     created: int
     owned_by: str = "vietnamese-embedding-service"
+    max_dimensions: Optional[int] = None
+    default_dimensions: Optional[int] = None
 
 class ModelListResponse(BaseModel):
     object: str = "list"
@@ -49,6 +51,20 @@ async def create_embeddings(request: EmbeddingRequest):
         
         model = get_embedding_model()
         logger.info("Model retrieved successfully")
+        
+        # Validate dimensions if provided
+        if request.dimensions:
+            max_dims = model.get_max_dimensions()
+            if request.dimensions > max_dims:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Requested dimensions ({request.dimensions}) exceed model maximum ({max_dims})"
+                )
+            if request.dimensions < 1:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Dimensions must be a positive integer"
+                )
         
         # Prepare texts
         if isinstance(request.input, str):
@@ -69,9 +85,13 @@ async def create_embeddings(request: EmbeddingRequest):
         
         logger.info(f"Processed texts: {processed_texts}")
         
-        # Generate embeddings
+        # Generate embeddings with requested dimensions
         logger.info("Generating embeddings...")
-        embeddings = model.encode(processed_texts, normalize_embeddings=True)
+        embeddings = model.encode(
+            processed_texts, 
+            dimensions=request.dimensions,
+            normalize_embeddings=True
+        )
         logger.info(f"Embeddings generated with shape: {embeddings.shape}")
         
         # Prepare response
@@ -108,10 +128,13 @@ async def create_embeddings(request: EmbeddingRequest):
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models():
     """List available models - OpenAI compatible."""
+    model = get_embedding_model()
     models = [
         ModelInfo(
             id="text-embedding-ada-002",
             created=int(time.time()),
+            max_dimensions=model.get_max_dimensions(),
+            default_dimensions=model.get_default_dimensions()
         )
     ]
     return ModelListResponse(data=models)
@@ -121,6 +144,11 @@ async def health_check():
     """Health check endpoint."""
     try:
         model = get_embedding_model()
-        return {"status": "healthy"}
+        return {
+            "status": "healthy",
+            "model": model.get_model_name(),
+            "max_dimensions": model.get_max_dimensions(),
+            "default_dimensions": model.get_default_dimensions()
+        }
     except Exception:
         raise HTTPException(status_code=503, detail="Service unhealthy")
