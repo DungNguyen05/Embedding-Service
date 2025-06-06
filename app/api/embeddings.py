@@ -142,3 +142,14 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Service unhealthy")
+    
+
+@router.post("/v1/embeddings-test")
+async def test_embeddings_simple(request: dict):
+    """Simple test endpoint for debugging."""
+    try:
+        logger.info(f"Test request received: {request}")
+        return {"status": "ok", "received": request}
+    except Exception as e:
+        logger.error(f"Test endpoint failed: {e}")
+        return {"error": str(e)}

@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Create necessary directories
-RUN mkdir -p /home/app/.cache/huggingface /app/logs
+RUN mkdir -p /app/models_cache /app/logs
 RUN chown -R app:app /home/app /app
 
 # Switch to app user
@@ -24,7 +24,9 @@ USER app
 
 # Copy application code
 COPY --chown=app:app app/ ./app/
-COPY --chown=app:app .env ./ 2>/dev/null || echo "No .env file found, using environment variables"
+
+# Copy .env file if it exists (optional)
+COPY --chown=app:app .env* ./
 
 # Set environment variables
 ENV PYTHONPATH=/app
@@ -35,7 +37,7 @@ ENV TOKENIZERS_PARALLELISM=false
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=300s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run app
